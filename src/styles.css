@@ -82,12 +82,11 @@ h1 { font-size: clamp(27px, 3.6vw, 40px); font-weight: 550; letter-spacing: -1.6
 }
 .table-heading span:nth-child(2) { text-align: center; }
 .table-heading span:last-child { text-align: right; }
-.day-row { position: relative; align-items: center; min-height: 68px; padding: 12px 0; border-bottom: 1px solid #eef0f3; }
-.day-row:last-child { border: 0; }
+.day-row { position: relative; align-items: center; min-height: 68px; padding: 10px 0; }
 .day-item { border-bottom: 1px solid #eef0f3; }
 .day-item:last-child { border-bottom: 0; }
 .day-toggle {
-  width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink);
+  width: 100%; min-width: 0; padding: 6px 0; text-align: left; border: 0; background: transparent; color: var(--ink);
   transition: background 180ms; border-radius: 7px;
 }
 .day-toggle:hover { background: #f8f9fc; }
@@ -98,24 +97,16 @@ h1 { font-size: clamp(27px, 3.6vw, 40px); font-weight: 550; letter-spacing: -1.6
 .day-toggle .day-detail { margin-left: 14px; }
 .timeline-setting {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px;
-  color: var(--ink); background: var(--slate-2); border-radius: 8px; font-size: 12px; font-weight: 550; cursor: pointer;
+  margin-bottom: 10px; color: var(--ink); background: var(--slate-2); border-radius: 8px; font-size: 12px; font-weight: 550; cursor: pointer;
 }
-.hours-entry { padding: 16px 0 20px; }
-.hours-entry.in-timeline { border-top: 1px dashed var(--slate-5); }
-.hours-entry > label { display: block; font-size: 12px; font-weight: 550; }
-.hours-hint { color: var(--muted); font-size: 11px; line-height: 1.5; margin: 4px 0 10px; }
-.hours-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.hours-controls .clear-hours {
-  color: var(--muted); padding: 6px; border: 0; border-radius: 5px; background: transparent; font-size: 11px;
+.hours-error { grid-column: 1 / -1; margin: 7px 0 0; font-size: 12px; line-height: 1.5; color: var(--negative); }
+.day-category-breakdown {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 13px; margin: 4px 0 0 14px;
+  font-size: 10px; color: var(--muted);
 }
-.hours-controls .clear-hours:hover { color: var(--ink); background: var(--slate-3); }
-.counted-hours { text-align: center; color: var(--positive); font-size: 13px; font-weight: 550; font-variant-numeric: tabular-nums; }
-.counted-hours.empty { color: var(--muted); font-weight: 400; }
-.day-category-breakdown { grid-column: 1 / -1; display: flex; gap: 13px; font-size: 10px; margin: 7px 0 0 14px; }
 .category-related { color: #995216; }
 .category-away { color: var(--negative); }
-.day-info { min-width: 0; }
-.day-label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; font-weight: 550; cursor: text; }
+.day-label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; font-weight: 550; }
 .day-detail { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-top: 5px; font-size: 10px; color: var(--muted); }
 .day-detail > span:first-child { white-space: nowrap; }
 .day-detail > span + span::before { content: "·"; margin-right: 8px; }
@@ -124,26 +115,26 @@ h1 { font-size: clamp(27px, 3.6vw, 40px); font-weight: 550; letter-spacing: -1.6
 .is-weekend .day-label { color: var(--muted); }
 .holiday-label { color: #786121; }
 .input-wrap {
-  width: 88px; position: relative; background: #f9fafb; border: 1px solid #d8dce4; border-radius: 8px;
+  grid-column: 2; grid-row: 1; justify-self: center; width: 88px; position: relative; background: #fafbfc; border: 1px solid #89919e; border-radius: 8px;
   transition: border-color 180ms, background 180ms, box-shadow 180ms;
 }
-.input-wrap:hover { border-color: var(--slate-8); }
+.input-wrap:hover { border-color: var(--slate-10); }
 .input-wrap:focus-within { border-color: var(--indigo-8); background: white; box-shadow: 0 0 0 3px var(--indigo-3); }
 .input-wrap input {
   width: 100%; height: 39px; background: transparent; border: 0; padding: 0 24px 0 10px; border-radius: inherit;
   color: var(--ink); font-size: 14px; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums;
 }
-.input-wrap input:focus-visible { outline: 0; }
+.input-wrap input:focus-visible { outline: 2px solid var(--indigo-9); outline-offset: 1px; }
+.input-wrap:has([aria-invalid="true"]) { border-color: var(--negative); }
 .input-wrap input::placeholder { color: #747b88; font-weight: 400; }
 .input-wrap > span { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 11px; pointer-events: none; }
-.day-balance { display: flex; align-items: center; justify-content: end; gap: 5px; font-size: 12px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.day-balance { grid-column: 3; grid-row: 1; display: flex; align-items: center; justify-content: end; gap: 5px; font-size: 12px; font-weight: 550; font-variant-numeric: tabular-nums; }
 .day-balance svg { width: 13px; height: 13px; }
 .negative { color: var(--negative); }
 .positive { color: var(--positive); }
 .neutral { color: var(--muted); }
 .empty { color: #757d8a; font-weight: 400; }
-.timesheet-note { display: flex; align-items: center; gap: 7px; font-size: 10px; color: var(--muted); padding: 17px 0 20px; border-top: 1px solid var(--slate-4); }
-.tiny-dot { width: 4px; height: 4px; background: var(--slate-8); border-radius: 50%; }
+.timesheet-note { margin: 0; font-size: 11px; line-height: 1.6; color: var(--muted); padding: 16px 0; border-top: 1px solid var(--slate-4); }
 .weekly-summary { min-width: 0; border-left: 1px solid #e9ebf0; background: #fafbfe; padding: 28px; }
 .summary-content { position: sticky; top: 24px; }
 .weekly-summary .eyebrow { margin-top: 4px; font-size: 9px; letter-spacing: 1.5px; }
@@ -257,6 +248,7 @@ footer a:hover { color: var(--indigo-11); }
   .summary-divider, .summary-details, .summary-footnote { display: none; }
   .table-heading { padding-top: 19px; }
   .day-row { min-height: 76px; }
+  .input-wrap input { font-size: 16px; }
   .day-detail { display: block; }
   .day-detail .expected-label, .day-detail .holiday-label { display: block; margin-top: 2px; }
   .day-detail > span + span::before { display: none; }

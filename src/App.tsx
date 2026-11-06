@@ -5,7 +5,7 @@ import {
   addDays, dateKey, expectedMinutes, formatDelta, formatMinutes, holidaysForYear, holidaysOn,
   parseDateKey, startOfWeek, summarizeWeek, weekDays,
 } from './lib/time';
-import { dayTotals, eventsForDate, removeEvent, upsertEvent, validateSchedule } from './lib/schedule';
+import { dayTotals, eventsForDate, removeEvent, setDayCountedTotal, upsertEvent, validateSchedule } from './lib/schedule';
 import { loadSchedule, saveSchedule, SCHEDULE_STORAGE_KEY } from './lib/schedule-storage';
 import type { Schedule, TimeEvent } from './lib/schedule-types';
 import { applyPatch, emptyPatch, hasPendingChanges, recordChanges } from './lib/schedule-draft';
@@ -103,15 +103,6 @@ export default function App() {
     if (error) setStorageError(error);
   }
 
-  function saveHours(key: string, minutes: number | null) {
-    return commitChange(state => {
-      const legacy = { ...state.legacy };
-      if (minutes === null) delete legacy[key];
-      else legacy[key] = minutes;
-      return { ...state, legacy };
-    });
-  }
-
   function changeWeek(next: Date) {
     setWeek(startOfWeek(next));
     setExpandedDate(null);
@@ -177,33 +168,35 @@ export default function App() {
                 const timelineEnabled = schedule.timelineEnabled?.[key] ?? (dayEvents.length > 0);
                 const untimedMinutes = schedule.legacy[key];
                 const dayTotal = totals[key];
+                const countedBlocks = dayTotal.counted - (untimedMinutes ?? 0);
                 const balanceId = `balance-${key}`;
                 return <article className={`day-item ${isExpanded ? 'is-expanded' : ''}`} key={key}>
-                  <button className={`day-row day-toggle ${isToday ? 'is-today' : ''} ${weekend ? 'is-weekend' : ''}`}
-                    id={`day-${key}`} aria-expanded={isExpanded} aria-controls={`entry-${key}`}
-                    onClick={() => setExpandedDate(isExpanded ? null : key)}>
-                  <div className="day-info">
-                    <span className="day-label"><span className="day-chevron" aria-hidden="true"><Icon name="right" /></span>
-                      {day.toLocaleDateString('en-US', { weekday: 'long' })}
-                      {isToday && <span className="today-tag">Today</span>}
+                  <div className={`day-row ${isToday ? 'is-today' : ''} ${weekend ? 'is-weekend' : ''}`}>
+                    <button className="day-toggle" id={`day-${key}`} aria-expanded={isExpanded} aria-controls={`entry-${key}`}
+                      onClick={() => setExpandedDate(isExpanded ? null : key)}>
+                      <span className="day-label"><span className="day-chevron" aria-hidden="true"><Icon name="right" /></span>
+                        {day.toLocaleDateString('en-US', { weekday: 'long' })}
+                        {isToday && <span className="today-tag">Today</span>}
+                      </span>
+                      <span className="day-detail"><span>{shortDate(day)}</span>
+                        {holidays.length > 0 ? <span className="holiday-label">{holidays.map(h => h.name
+                          + (h.observed ? ' (observed)' : '')).join(', ')}</span>
+                          : <span className="expected-label">{expected ? '8h expected' : 'No hours expected'}</span>}
+                      </span>
+                    </button>
+                    <HoursEntry date={key} label={fullDate(day)} total={value}
+                      description={`hours-help ${balanceId}${dayEvents.length ? ' blocks-' + key : ''}`}
+                      onSave={minutes => commitChange(state => setDayCountedTotal(state, key, minutes))} />
+                    <span id={balanceId} className={`day-balance ${difference === null ? 'empty' : tone(difference)}`}>
+                      {difference === null ? <span aria-label="No hours entered">—</span>
+                        : difference === 0 ? <><Icon name="check" /><span>On target</span></> : formatDelta(difference)}
                     </span>
-                    <span className="day-detail"><span>{shortDate(day)}</span>
-                      {holidays.length > 0 ? <span className="holiday-label">{holidays.map(h => h.name
-                        + (h.observed ? ' (observed)' : '')).join(', ')}</span>
-                        : <span className="expected-label">{expected ? '8h expected' : 'No hours expected'}</span>}
-                    </span>
+                    {dayEvents.length > 0 && <span id={`blocks-${key}`} className="day-category-breakdown">
+                      {countedBlocks > 0 && <span>{formatMinutes(countedBlocks)} in counted blocks</span>}
+                      {dayTotal.related > 0 && <span className="category-related">{formatMinutes(dayTotal.related)} related</span>}
+                      {dayTotal.away > 0 && <span className="category-away">{formatMinutes(dayTotal.away)} away</span>}
+                    </span>}
                   </div>
-                  <span className={`counted-hours ${value === undefined ? 'empty' : ''}`}>
-                    {value === undefined ? '—' : formatMinutes(value)}</span>
-                  <span id={balanceId} className={`day-balance ${difference === null ? 'empty' : tone(difference)}`}>
-                    {difference === null ? <span aria-label="No hours entered">—</span>
-                      : difference === 0 ? <><Icon name="check" /><span>On target</span></> : formatDelta(difference)}
-                  </span>
-                  {(dayTotal.related > 0 || dayTotal.away > 0) && <span className="day-category-breakdown">
-                    {dayTotal.related > 0 && <span className="category-related">{formatMinutes(dayTotal.related)} related</span>}
-                    {dayTotal.away > 0 && <span className="category-away">{formatMinutes(dayTotal.away)} away</span>}
-                  </span>}
-                  </button>
                   <div id={`entry-${key}`} hidden={!isExpanded} role="region" aria-labelledby={`day-${key}`}>
                     {isExpanded && <>
                       <label className="timeline-setting" htmlFor={`mode-${key}`}>
@@ -217,18 +210,12 @@ export default function App() {
                             upsertEvent(state, event, occurrenceDate, scope))}
                           onDelete={(id, date, scope) => commitChange(state => removeEvent(state, id, date, scope))} />
                       </div>
-                      <div hidden={timelineEnabled && untimedMinutes === undefined}>
-                        <HoursEntry minutes={untimedMinutes} inTimeline={timelineEnabled}
-                          countedBlockMinutes={dayTotal.counted - (untimedMinutes ?? 0)}
-                          onSave={minutes => saveHours(key, minutes)}
-                          onClear={() => document.getElementById(`mode-${key}`)?.focus()} />
-                      </div>
                     </>}
                   </div>
                 </article>;
               })}
             </div>
-            <div className="timesheet-note"><span className="tiny-dot" />Open a day to enter hours or use its event timeline.</div>
+            <p className="timesheet-note" id="hours-help">Enter daily totals in hours, like 6.5. Press Enter or leave the field to save.</p>
           </section>
 
           <aside className="weekly-summary" aria-labelledby="summary-heading">

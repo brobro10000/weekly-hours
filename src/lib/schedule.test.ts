@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Schedule, TimeEvent } from './schedule-types';
 import {
-  dayTotals, eventsForDate, findConflict, formatClock, occursOn, parseClock, removeEvent,
+  dayTotals, eventsForDate, findConflict, formatClock, occursOn, parseClock, removeEvent, setDayCountedTotal,
   upsertEvent, validateEvent, validateSchedule,
 } from './schedule';
 
@@ -83,6 +83,53 @@ describe('occurrences and category totals', () => {
     expect(dayTotals(state, '2026-11-02')).toEqual({ counted: 510, related: 60, away: 30, hasEntries: true });
     expect(dayTotals(state, '2026-11-03')).toEqual({ counted: 0, related: 0, away: 0, hasEntries: false });
     expect(dayTotals(schedule([], { '2026-11-03': 0 }), '2026-11-03').hasEntries).toBe(true);
+  });
+});
+
+describe('daily counted totals', () => {
+  const day = '2026-11-04';
+
+  it('replaces only untimed minutes and includes counted recurring occurrences in the requested total', () => {
+    const state = {
+      ...schedule([recurring(), block({ id: 'away', date: day, category: 'away', start: 600, end: 630 })],
+        { [day]: 480, '2026-11-05': 390 }),
+      timelineEnabled: { [day]: false },
+    };
+    const updated = setDayCountedTotal(state, day, 390);
+    expect(updated.legacy).toEqual({ [day]: 330, '2026-11-05': 390 });
+    expect(dayTotals(updated, day)).toEqual({ counted: 390, related: 0, away: 30, hasEntries: true });
+    expect(updated.events).toBe(state.events);
+    expect(updated.timelineEnabled).toBe(state.timelineEnabled);
+    expect(state.legacy[day]).toBe(480);
+    expect(setDayCountedTotal(updated, day, 390)).toEqual(updated);
+  });
+
+  it('removes untimed hours on clear or exact block coverage while keeping the scheduled work', () => {
+    const state = schedule([recurring()], { [day]: 330 });
+    for (const total of [60, null]) {
+      const updated = setDayCountedTotal(state, day, total);
+      expect(updated.legacy).toEqual({});
+      expect(dayTotals(updated, day).counted).toBe(60);
+    }
+    expect(() => setDayCountedTotal(state, day, 59)).toThrow(/1h.*[Ee]dit.*blocks.*timeline/);
+    expect(state.legacy[day]).toBe(330);
+  });
+
+  it('distinguishes zero from clearing on a date with no counted occurrences', () => {
+    const state = schedule([recurring({ excludedDates: [day] })]);
+    const zero = setDayCountedTotal(state, day, 0);
+    expect(zero.legacy[day]).toBe(0);
+    expect(dayTotals(zero, day).hasEntries).toBe(true);
+    expect(dayTotals(setDayCountedTotal(zero, day, null), day).hasEntries).toBe(false);
+  });
+
+  it('validates dates, minute values, and capacity used by other categories', () => {
+    const state = schedule([recurring({ category: 'related' })]);
+    for (const invalid of [-1, 1.5, 1441, NaN]) expect(() => setDayCountedTotal(state, day, invalid)).toThrow('24 hours');
+    expect(() => setDayCountedTotal(state, '2026-02-29', null)).toThrow('date');
+    expect(() => setDayCountedTotal(state, day, 1381)).toThrow('exceed 24 hours');
+    expect(setDayCountedTotal(state, day, 1380).legacy[day]).toBe(1380);
+    expect(state.legacy).toEqual({});
   });
 });
 

@@ -1,59 +1,48 @@
-import { useId, useRef, useState } from 'react';
-import { Button } from '@radix-ui/themes';
-import { formatMinutes, parseHours } from '../lib/time';
+import { useState } from 'react';
+import { parseHours } from '../lib/time';
 
 type HoursEntryProps = {
-  minutes?: number;
-  countedBlockMinutes: number;
-  inTimeline: boolean;
-  onSave: (minutes: number | null) => string | null;
-  onClear: () => void;
+  date: string;
+  label: string;
+  total?: number;
+  description: string;
+  onSave: (total: number | null) => string | null;
 };
 
-export default function HoursEntry({ minutes, countedBlockMinutes, inTimeline, onSave, onClear }: HoursEntryProps) {
-  const id = useId();
-  const input = useRef<HTMLInputElement>(null);
+export default function HoursEntry({ date, label, total, description, onSave }: HoursEntryProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const saved = minutes === undefined ? '' : String(Number((minutes / 60).toFixed(2)));
-  const label = inTimeline ? 'Hours without time blocks' : countedBlockMinutes ? 'Additional counted hours' : 'Counted hours';
-  const hint = inTimeline ? 'Reduce these hours when you replace them with counted blocks.'
-    : countedBlockMinutes ? `${formatMinutes(countedBlockMinutes)} already counted from time blocks. Enter any additional hours.`
-    : 'Enter decimal hours, such as 6.5 for 6h 30m.';
+  const saved = total === undefined ? '' : String(Number((total / 60).toFixed(2)));
+  const errorId = `hours-error-${date}`;
 
-  function save(value: string) {
+  function reset() {
+    setDraft(null);
+    setError('');
+  }
+
+  function save() {
+    if (draft === null) return;
     try {
-      const next = parseHours(value);
-      const problem = onSave(next);
+      const problem = onSave(parseHours(draft));
       if (problem) { setError(problem); return; }
-      setDraft(null);
-      setError('');
-      setNotice(next === null ? 'Hours cleared.' : `${formatMinutes(next)} counted.`);
-      if (next === null) {
-        if (inTimeline) onClear();
-        else input.current?.focus();
-      }
+      reset();
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'Enter hours from 0 to 24.');
+      setError(problem instanceof Error ? problem.message : 'Enter decimal hours between 0 and 24.');
     }
   }
 
-  return <form className={`hours-entry ${inTimeline ? 'in-timeline' : ''}`} onSubmit={event => {
-    event.preventDefault();
-    save(draft ?? saved);
-  }}>
-    <label htmlFor={id}>{label}</label>
-    <p className="hours-hint" id={`${id}-hint`}>{hint}</p>
-    <div className="hours-controls">
-      <div className="input-wrap"><input ref={input} id={id} type="text" inputMode="decimal" placeholder="0.0" value={draft ?? saved}
-        aria-invalid={Boolean(error)} aria-describedby={`${id}-hint${error ? ' ' + id + '-error' : ''}`}
-        onChange={event => { setDraft(event.target.value); setError(''); setNotice(''); }} />
-        <span aria-hidden="true">h</span></div>
-      <Button size="2" variant="soft" type="submit">{inTimeline ? 'Update hours' : 'Save hours'}</Button>
-      {minutes !== undefined && <button type="button" className="clear-hours" onClick={() => save('')}>Clear hours</button>}
+  return <>
+    <div className="input-wrap">
+      <input type="text" inputMode="decimal" enterKeyHint="done" aria-label={`Counted hours for ${label}`}
+        aria-invalid={Boolean(error)} aria-describedby={error ? `${errorId} ${description}` : description}
+        placeholder="—" value={draft ?? saved} onChange={event => { setDraft(event.target.value); setError(''); }}
+        onBlur={save} onKeyDown={event => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === 'Enter') { event.preventDefault(); save(); }
+          if (event.key === 'Escape') { event.preventDefault(); reset(); }
+        }} />
+      <span aria-hidden="true">h</span>
     </div>
-    {error && <p id={`${id}-error`} className="timeline-error" role="alert">{error}</p>}
-    <span className="timeline-sr-only" role="status">{notice}</span>
-  </form>;
+    {error && <p id={errorId} className="hours-error" role="alert">{error}</p>}
+  </>;
 }

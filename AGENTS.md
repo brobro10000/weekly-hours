@@ -5,9 +5,11 @@ Build a small, public GitHub Pages app for tracking categorized time blocks acro
 - Use React, TypeScript, Vite, and the imported DayPicker calendar component.
 - Apply Radix Themes with indigo/slate tokens. Keep graphics compact and respect reduced-motion preferences.
 - Keep entries browser-local. Do not add accounts, analytics, or server storage.
-- Inside each day, offer simple decimal hours and an optional 24-hour event timeline. Store explicit timeline choices
+- Show an editable total beside every day in the weekly list. Expanding a day gives access to the optional timeline.
+  Save direct entry on Enter or blur. Escape discards a draft. Store explicit timeline choices
   by civil date. Default to the timeline if the date has events, including recurring occurrences.
-- Use the existing untimed counted-minute bucket for simple hours. Include it and each event once in all views.
+- Store the difference between the entered daily total and its counted blocks in the existing untimed-minute bucket.
+  Clearing a field removes only untimed hours. Include each event once in all views.
   Green Counted time contributes to the weekly target. Keep orange Related and red Away time separate.
 - Prevent overlapping blocks, including future recurring collisions. Touching endpoints are allowed.
 - Recurrence supports multiple weekdays, every 1–12 weeks, optional end dates, and occurrence/series edits and deletion.

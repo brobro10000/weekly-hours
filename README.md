@@ -9,11 +9,12 @@ views feed the same holiday-adjusted weekly total.
 
 - Monday–Friday starts at 8 hours per day, or 40 per week.
 - Weekends and observed US federal holidays expect zero hours. Every day remains editable.
-- Open a day, enter counted hours such as `6.5`, and select **Save hours**.
+- Type a daily total, such as `6.5`, in the **Counted** field beside any day. Press Enter, Tab, or click away to
+  save. Escape discards the current edit. You can enter an entire week with every day collapsed.
 - Turn on **Event timeline** for a date to add time blocks or recurring events. Empty dates start with simple entry.
   Dates with scheduled events open in timeline view until you choose another setting for that date.
-- With the timeline hidden, existing blocks still contribute to their categories. If a counted block is already on
-  the day, the simple form shows its duration and asks for **Additional counted hours**.
+- The field includes counted time blocks. For example, entering `6.5` on a date with a two-hour counted block adds
+  4h 30m of untimed work. Clearing the field removes the untimed portion. Edit the block to reduce its duration.
 - **Green · Counted:** contributes to the weekly target.
 - **Orange · Related:** work-related time shown separately; does not reduce the target.
 - **Red · Away from desk:** tracked separately; does not reduce the target.
@@ -43,10 +44,8 @@ week. There is no separate planned-versus-completed state.
 
 ## Earlier hours
 
-Hours saved in the first version are preserved as counted totals without clock times. Expand a day to update or clear
-its counted hours. In timeline view, **Hours without time blocks** includes these entries and hours saved in simple
-view. Reduce this value when replacing those hours with counted blocks.
-The old storage key is retained as a backup; future changes use the new categorized schedule.
+Hours saved in the first version appear in the daily **Counted** fields. Edit or clear them directly in the list.
+The original browser storage key is retained as a backup.
 
 ## Design
 

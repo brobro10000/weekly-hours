@@ -1,5 +1,5 @@
 import type { DayTotals, EditScope, Schedule, TimeCategory, TimeEvent } from './schedule-types';
-import { dateKey, parseDateKey } from './time';
+import { dateKey, formatMinutes, parseDateKey } from './time';
 
 const MINUTES_PER_DAY = 1440;
 const DAY_MS = 86_400_000;
@@ -219,6 +219,21 @@ function checked(schedule: Schedule): Schedule {
   const error = validateSchedule(schedule);
   if (error) throw new Error(error);
   return schedule;
+}
+
+export function setDayCountedTotal(schedule: Schedule, key: string, total: number | null): Schedule {
+  if (!validDate(key)) throw new Error('Choose a valid calendar date.');
+  if (total !== null && (!Number.isInteger(total) || total < 0 || total > MINUTES_PER_DAY)) {
+    throw new Error('Enter between 0 and 24 hours for this day, to the nearest minute.');
+  }
+  const booked = dayTotals(schedule, key).counted - (schedule.legacy[key] ?? 0);
+  if (total !== null && total < booked) {
+    throw new Error(`Counted blocks already cover ${formatMinutes(booked)}. Edit those blocks in the timeline to enter less.`);
+  }
+  const legacy = { ...schedule.legacy };
+  if (total === null || (total === booked && booked > 0)) delete legacy[key];
+  else legacy[key] = total - booked;
+  return checked({ ...schedule, legacy });
 }
 
 export function upsertEvent(

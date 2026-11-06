@@ -1,11 +1,11 @@
-# Timeline interface — revision 2
+# Timeline interface — revision 3
 
 Shared types live in `src/lib/schedule-types.ts`. Root owns these types and all integration.
 
 ## Behavior
 
-- Expand one day at a time. The per-date **Event timeline** switch chooses between a decimal hours entry and the
-  00:00–24:00 timeline. The optional v2 `timelineEnabled` map stores explicit boolean settings by civil date.
+- Decimal daily totals are editable in the weekly list at all times. Expand a day to switch on its 00:00–24:00
+  event timeline. The optional v2 `timelineEnabled` map stores explicit boolean settings by civil date.
   A date with no saved preference shows its timeline when it has a scheduled occurrence.
 - Counted is green and reduces the weekly target. Related is orange and Away is red; neither reduces the target.
 - Times use integer minutes, with `0 <= start < end <= 1440`. Overnight events are split into two day entries.
@@ -18,8 +18,9 @@ Shared types live in `src/lib/schedule-types.ts`. Root owns these types and all 
   create a one-off replacement with a deterministic id. Whole-series edits change the repeating rule throughout its
   date range, including earlier dates, while preserving detached overrides. Whole-series deletion removes direct
   detached one-off overrides too. Overrides converted into independent recurring series remain independent.
-- Keep prior daily totals as `legacy` counted minutes without inventing clock times. Show and allow editing this
-  total in either view. Simple entry also writes to `legacy`. Untimed minutes plus all scheduled category minutes
+- Keep prior daily totals as untimed `legacy` minutes. Setting a daily total replaces the untimed portion with the
+  difference between the requested total and the counted blocks on that date. Clearing removes the untimed portion.
+  Untimed minutes plus all scheduled category minutes
   must fit in 1440 minutes per day. Visibility has no effect on totals, overlap checks, or recurrence.
 - Calendar, target adjustments, browser-local storage, mobile layout, and reduced-motion support remain.
 
@@ -28,6 +29,7 @@ Shared types live in `src/lib/schedule-types.ts`. Root owns these types and all 
 - `occursOn(event: TimeEvent, key: string): boolean`
 - `eventsForDate(events: TimeEvent[], key: string): TimeEvent[]` (sorted start time, then end, then id)
 - `dayTotals(schedule: Schedule, key: string): DayTotals` (includes legacy in counted only)
+- `setDayCountedTotal(schedule: Schedule, key: string, total: number | null): Schedule`
 - `formatClock(minutes: number): string` (24-hour HH:mm, includes 24:00)
 - `parseClock(value: string): number | null` (strict HH:mm, 24:00 accepted)
 - `validateEvent(event: TimeEvent): string | null` (actionable validation error)

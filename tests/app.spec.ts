@@ -9,7 +9,8 @@ const summary = (page: Page) => page.getByRole('complementary', { name: 'WEEKLY 
 const balance = (page: Page, date: string) => page.locator(`#balance-${date}`);
 const panel = (page: Page) => page.locator('.day-timeline');
 const timelineSwitch = (page: Page) => page.getByRole('switch', { name: 'Event timeline', exact: true });
-const hoursField = (page: Page, name = 'Counted hours') => page.getByLabel(name, { exact: true });
+const hoursField = (page: Page, weekday = 'Monday') =>
+  page.getByRole('textbox', { name: new RegExp(`^Counted hours for ${weekday},`) });
 const calendarTrigger = (page: Page) => page.getByRole('button', { name: /Nov 2 – Nov 8/ });
 const eventRow = (page: Page, title: string) => page.getByRole('list', { name: 'Events for this day' })
   .getByRole('listitem').filter({ has: page.getByText(title, { exact: true }) });
@@ -67,16 +68,20 @@ test.beforeEach(async ({ page }) => {
   await page.goto('./');
 });
 
-test('simple hours update the balance and each date remembers its own timeline switch', async ({ page }) => {
-  await openDay(page);
-  await expect(timelineSwitch(page)).not.toBeChecked();
-  await expect(panel(page)).toBeHidden();
+test('collapsed day rows accept hours directly and each date remembers its own timeline switch', async ({ page }) => {
+  await expect(page.getByRole('textbox', { name: /^Counted hours for / })).toHaveCount(7);
+  await expect(page.getByRole('textbox', { name: 'Counted hours for Monday, November 2, 2026' })).toBeVisible();
   await hoursField(page).fill('6.5');
-  await page.getByRole('button', { name: 'Save hours', exact: true }).click();
+  await hoursField(page).press('Enter');
+  await hoursField(page, 'Tuesday').fill('8.5');
+  await hoursField(page, 'Tuesday').press('Tab');
   await expect(balance(page, '2026-11-02')).toHaveText('−1h 30m');
-  await expect(summary(page).getByLabel('6h 30m logged', { exact: true })).toBeVisible();
+  await expect(balance(page, '2026-11-03')).toHaveText('+30m');
+  await expect(summary(page).getByLabel('15h logged', { exact: true })).toBeVisible();
+  await expect(timelineSwitch(page)).toBeHidden();
 
   await openDay(page, 'Tuesday');
+  await expect(timelineSwitch(page)).not.toBeChecked();
   await timelineSwitch(page).click();
   await expect(panel(page)).toBeVisible();
   await nextWeek(page);
@@ -84,6 +89,8 @@ test('simple hours update the balance and each date remembers its own timeline s
   await expect(timelineSwitch(page)).not.toBeChecked();
 
   await page.reload();
+  await expect(hoursField(page)).toHaveValue('6.5');
+  await expect(hoursField(page, 'Tuesday')).toHaveValue('8.5');
   await openDay(page, 'Tuesday');
   await expect(timelineSwitch(page)).toBeChecked();
   await expect(panel(page)).toBeVisible();
@@ -91,9 +98,27 @@ test('simple hours update the balance and each date remembers its own timeline s
   await expect(timelineSwitch(page)).not.toBeChecked();
   await expect(hoursField(page)).toHaveValue('6.5');
   await timelineSwitch(page).click();
-  await expect(hoursField(page, 'Hours without time blocks')).toHaveValue('6.5');
+  await expect(hoursField(page)).toHaveValue('6.5');
   await expect(panel(page).locator('.timeline-block')).toHaveCount(0);
-  await expect(summary(page).getByLabel('6h 30m logged', { exact: true })).toBeVisible();
+  await expect(summary(page).getByLabel('15h logged', { exact: true })).toBeVisible();
+});
+
+test('inline hours distinguish zero from blank and Escape discards an edit', async ({ page }) => {
+  await hoursField(page).fill('0');
+  await hoursField(page).press('Tab');
+  await expect(balance(page, '2026-11-02')).toHaveText('−8h');
+  await page.reload();
+  await expect(hoursField(page)).toHaveValue('0');
+  await hoursField(page).fill('7');
+  await hoursField(page).press('Escape');
+  await expect(hoursField(page)).toHaveValue('0');
+  await expect(balance(page, '2026-11-02')).toHaveText('−8h');
+  await hoursField(page).fill('');
+  await hoursField(page).press('Enter');
+  await expect(balance(page, '2026-11-02')).toHaveText('—');
+  await page.reload();
+  await expect(hoursField(page)).toHaveValue('');
+  await expect(balance(page, '2026-11-02')).toHaveText('—');
 });
 
 test('hiding a recurring date keeps each category counted once and leaves other occurrences visible', async ({ page }) => {
@@ -105,10 +130,16 @@ test('hiding a recurring date keeps each category counted once and leaves other 
   await addEvent(page, { title: 'Lunch', start: '12:00', end: '12:45', category: 'Away from desk' });
   await timelineSwitch(page).click();
   await expect(panel(page)).toBeHidden();
-  await expect(hoursField(page, 'Additional counted hours')).toHaveValue('');
+  await expect(hoursField(page)).toHaveValue('1');
   await expect(summary(page).getByLabel('2h logged', { exact: true })).toBeVisible();
-  await hoursField(page, 'Additional counted hours').fill('7.5');
-  await page.getByRole('button', { name: 'Save hours', exact: true }).click();
+  await hoursField(page).fill('0.5');
+  await hoursField(page).press('Enter');
+  await expect(hoursField(page)).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByRole('alert')).toContainText(/block|timeline|scheduled/i);
+  await expect(summary(page).getByLabel('2h logged', { exact: true })).toBeVisible();
+  await hoursField(page).fill('8.5');
+  await hoursField(page).press('Tab');
+  await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(balance(page, '2026-11-02')).toHaveText('+30m');
   await expect(summary(page).getByLabel('9h 30m logged', { exact: true })).toBeVisible();
   await expect(summary(page).getByRole('img', { name: /^Monday:/ })).toHaveAccessibleName(
@@ -124,14 +155,14 @@ test('hiding a recurring date keeps each category counted once and leaves other 
   await page.reload();
   await openDay(page);
   await expect(timelineSwitch(page)).not.toBeChecked();
-  await expect(hoursField(page, 'Additional counted hours')).toHaveValue('7.5');
+  await expect(hoursField(page)).toHaveValue('8.5');
   await timelineSwitch(page).click();
   await expect(page.getByRole('list', { name: 'Events for this day' }).getByRole('listitem')).toHaveCount(3);
-  await expect(hoursField(page, 'Hours without time blocks')).toHaveValue('7.5');
+  await expect(hoursField(page)).toHaveValue('8.5');
   await expect(summary(page).getByLabel('9h 30m logged', { exact: true })).toBeVisible();
 });
 
-test('the simple editor and day switch are accessible on a narrow screen and work by keyboard', async ({ page }) => {
+test('inline entry and the day switch are accessible on a narrow screen and work by keyboard', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 810 });
   await openDay(page);
   await expect(hoursField(page)).toBeVisible();
@@ -146,7 +177,6 @@ test('the simple editor and day switch are accessible on a narrow screen and wor
   await page.keyboard.press('Space');
   await expect(timelineSwitch(page)).not.toBeChecked();
   await expect(hoursField(page)).toHaveValue('8.5');
-  await hoursField(page).press('Enter');
   await expect(balance(page, '2026-11-02')).toHaveText('+30m');
 });
 
@@ -306,11 +336,14 @@ test('earlier totals migrate without invented clock times and can be cleared wit
   await openDay(page);
   await expect(hoursField(page)).toHaveValue('6.5');
   await timelineSwitch(page).click();
-  await expect(hoursField(page, 'Hours without time blocks')).toHaveValue('6.5');
+  await expect(hoursField(page)).toHaveValue('6.5');
   await expect(panel(page).locator('.timeline-block')).toHaveCount(0);
   await addEvent(page, { title: 'New work', start: '09:00', end: '10:00' });
   await expect(summary(page).getByLabel('7h 30m logged', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Clear hours', exact: true }).click();
+  await expect(hoursField(page)).toHaveValue('7.5');
+  await hoursField(page).fill('');
+  await hoursField(page).press('Enter');
+  await expect(hoursField(page)).toHaveValue('1');
   await expect(summary(page).getByLabel('1h logged', { exact: true })).toBeVisible();
   await page.reload();
   await expect(summary(page).getByLabel('1h logged', { exact: true })).toBeVisible();
