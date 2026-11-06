@@ -3,9 +3,13 @@ import { DayPicker } from '@daypicker/react';
 import { Button, IconButton, Tooltip } from '@radix-ui/themes';
 import {
   addDays, dateKey, expectedMinutes, formatDelta, formatMinutes, holidaysForYear, holidaysOn,
-  parseDateKey, parseHours, startOfWeek, summarizeWeek, weekDays,
+  parseDateKey, startOfWeek, summarizeWeek, weekDays,
 } from './lib/time';
-import { loadEntries, saveEntries, STORAGE_KEY } from './lib/storage';
+import { dayTotals, eventsForDate, removeEvent, upsertEvent, validateSchedule } from './lib/schedule';
+import { loadSchedule, saveSchedule, SCHEDULE_STORAGE_KEY } from './lib/schedule-storage';
+import type { Schedule, TimeEvent } from './lib/schedule-types';
+import { applyPatch, emptyPatch, hasPendingChanges, recordChanges } from './lib/schedule-draft';
+import DayTimeline from './components/DayTimeline';
 
 function Icon({ name }: { name: 'left' | 'right' | 'calendar' | 'close' | 'check' | 'arrow' | 'lock' }) {
   const paths = {
@@ -23,24 +27,36 @@ const fullDate = (date: Date) => date.toLocaleDateString('en-US', {
 });
 const shortDate = (date: Date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const tone = (delta: number) => delta < 0 ? 'negative' : delta > 0 ? 'positive' : 'neutral';
-const hoursText = (minutes: number | undefined) => minutes === undefined ? '' : String(Number((minutes / 60).toFixed(2)));
+type ScheduleChange = (schedule: Schedule) => Schedule;
+
+function applyChanges(schedule: Schedule, changes: ScheduleChange[]): Schedule {
+  const next = changes.reduce((state, change) => change(state), schedule);
+  const error = validateSchedule(next);
+  if (error) throw new Error(error);
+  return next;
+}
 
 export default function App() {
-  const [initial] = useState(loadEntries);
-  const [entries, setEntries] = useState(initial.entries);
+  const [initial] = useState(loadSchedule);
+  const [schedule, setSchedule] = useState(initial.schedule);
   const [storageError, setStorageError] = useState(initial.error);
-  const [writable, setWritable] = useState(initial.writable);
   const [week, setWeek] = useState(() => startOfWeek(new Date()));
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [month, setMonth] = useState(week);
   const calendarDialog = useRef<HTMLDialogElement>(null);
   const calendarTrigger = useRef<HTMLButtonElement>(null);
-  const pendingEntries = useRef<Record<string, number | null>>({});
+  const pendingChanges = useRef(emptyPatch());
+  const currentSchedule = useRef(schedule);
   const days = weekDays(week);
+  const totals = Object.fromEntries(days.map(day => [dateKey(day), dayTotals(schedule, dateKey(day))]));
+  const entries = Object.fromEntries(days.filter(day => totals[dateKey(day)].hasEntries)
+    .map(day => [dateKey(day), totals[dateKey(day)].counted]));
   const summary = summarizeWeek(week, entries);
   const hasEntries = days.some(day => entries[dateKey(day)] !== undefined);
+  const relatedTotal = days.reduce((sum, day) => sum + totals[dateKey(day)].related, 0);
+  const awayTotal = days.reduce((sum, day) => sum + totals[dateKey(day)].away, 0);
+  const graphicMaximum = Math.max(600, ...Object.values(totals).map(day => day.counted + day.related + day.away));
   const today = dateKey(new Date());
   const isThisWeek = dateKey(week) === dateKey(startOfWeek(new Date()));
   const monthHolidays = holidaysForYear(month.getFullYear())
@@ -53,55 +69,39 @@ export default function App() {
 
   useEffect(() => {
     function sync(event: StorageEvent) {
-      if (event.key !== STORAGE_KEY && event.key !== null) return;
-      const latest = loadEntries();
-      if (latest.writable) {
-        const next = { ...latest.entries };
-        for (const [key, value] of Object.entries(pendingEntries.current)) {
-          if (value === null) delete next[key];
-          else next[key] = value;
-        }
-        setEntries(next);
-      }
-      if (!Object.keys(pendingEntries.current).length || latest.error) setStorageError(latest.error);
-      setWritable(latest.writable);
+      if (event.key !== SCHEDULE_STORAGE_KEY && event.key !== 'weekly-hours.entries.v1' && event.key !== null) return;
+      const latest = loadSchedule();
+      if (!latest.writable) { setStorageError(latest.error); return; }
+      const next = applyPatch(latest.schedule, pendingChanges.current);
+      currentSchedule.current = next;
+      setSchedule(next);
+      const conflict = validateSchedule(next);
+      if (conflict) setStorageError(`Another tab changed this schedule. Your unsaved edits are kept here. ${conflict}`);
+      else if (!hasPendingChanges(pendingChanges.current)) setStorageError(null);
     }
     window.addEventListener('storage', sync);
     return () => window.removeEventListener('storage', sync);
   }, []);
 
-  function updateEntry(key: string, value: string) {
-    setDrafts(current => ({ ...current, [key]: value }));
+  function commitChange(change: ScheduleChange): string | null {
+    const latest = loadSchedule();
     try {
-      const minutes = parseHours(value);
-      setErrors(current => ({ ...current, [key]: '' }));
-      // Merge with the latest saved entries so another tab's edits are not lost.
-      const latest = writable ? loadEntries() : null;
-      const next = { ...(latest?.writable ? latest.entries : entries) };
-      pendingEntries.current[key] = minutes;
-      for (const [pendingKey, pendingValue] of Object.entries(pendingEntries.current)) {
-        if (pendingValue === null) delete next[pendingKey];
-        else next[pendingKey] = pendingValue;
-      }
-      setEntries(next);
-      if (writable && latest?.writable) {
-        const error = saveEntries(next);
-        setStorageError(error);
-        if (!error) pendingEntries.current = {};
-      }
-      else if (latest && !latest.writable) {
-        setWritable(false);
-        setStorageError(latest.error);
-      }
-    } catch {
-      setErrors(current => ({ ...current, [key]: 'Enter a number from 0 to 24, like 6.5.' }));
+      const base = latest.writable ? applyPatch(latest.schedule, pendingChanges.current) : currentSchedule.current;
+      const next = applyChanges(base, [change]);
+      const error = latest.writable ? saveSchedule(next) : latest.error;
+      pendingChanges.current = error ? recordChanges(pendingChanges.current, base, next) : emptyPatch();
+      currentSchedule.current = next;
+      setSchedule(next);
+      setStorageError(error);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : 'This event could not be saved. Check its dates and times.';
     }
   }
 
   function changeWeek(next: Date) {
     setWeek(startOfWeek(next));
-    setDrafts({});
-    setErrors({});
+    setExpandedDate(null);
   }
 
   function closeCalendar() {
@@ -126,7 +126,7 @@ export default function App() {
 
       <main>
         <div className="page-heading"><div><p className="eyebrow">MAKE YOUR TIME COUNT</p>
-          <h1>Your week, at a glance.</h1><p className="subtitle">Log your hours. Know where you stand.</p></div>
+          <h1>Your week, at a glance.</h1><p className="subtitle">Plan your day. Know what counts.</p></div>
         </div>
 
         {storageError && <p className="storage-error" role="alert">{storageError}</p>}
@@ -149,7 +149,7 @@ export default function App() {
 
         <div className="workspace">
           <section className="timesheet" aria-label="Daily hours">
-            <div className="table-heading" aria-hidden="true"><span>DAY</span><span>HOURS</span><span>BALANCE</span></div>
+            <div className="table-heading" aria-hidden="true"><span>DAY</span><span>COUNTED</span><span>BALANCE</span></div>
             <div className="day-list">
               {days.map(day => {
                 const key = dateKey(day);
@@ -159,45 +159,56 @@ export default function App() {
                 const holidays = holidaysOn(day);
                 const weekend = day.getDay() === 0 || day.getDay() === 6;
                 const isToday = key === today;
-                const errorId = `error-${key}`;
+                const isExpanded = expandedDate === key;
+                const dayEvents = eventsForDate(schedule.events, key);
+                const dayTotal = totals[key];
                 const balanceId = `balance-${key}`;
-                return <div className={`day-row ${isToday ? 'is-today' : ''} ${weekend ? 'is-weekend' : ''}`} key={key}>
+                return <article className={`day-item ${isExpanded ? 'is-expanded' : ''}`} key={key}>
+                  <button className={`day-row day-toggle ${isToday ? 'is-today' : ''} ${weekend ? 'is-weekend' : ''}`}
+                    id={`day-${key}`} aria-expanded={isExpanded} aria-controls={`timeline-${key}`}
+                    onClick={() => setExpandedDate(isExpanded ? null : key)}>
                   <div className="day-info">
-                    <label htmlFor={`hours-${key}`} className="day-label">
+                    <span className="day-label"><span className="day-chevron" aria-hidden="true"><Icon name="right" /></span>
                       {day.toLocaleDateString('en-US', { weekday: 'long' })}
                       {isToday && <span className="today-tag">Today</span>}
-                    </label>
+                    </span>
                     <span className="day-detail"><span>{shortDate(day)}</span>
                       {holidays.length > 0 ? <span className="holiday-label">{holidays.map(h => h.name
                         + (h.observed ? ' (observed)' : '')).join(', ')}</span>
                         : <span className="expected-label">{expected ? '8h expected' : 'No hours expected'}</span>}
                     </span>
                   </div>
-                  <div className="hours-cell">
-                    <div className={`input-wrap ${errors[key] ? 'input-error' : ''}`}>
-                      <input id={`hours-${key}`} aria-label={`${fullDate(day)} hours`} type="text" inputMode="decimal"
-                        autoComplete="off" spellCheck={false} placeholder="—" value={drafts[key] ?? hoursText(value)}
-                        aria-invalid={!!errors[key]} aria-describedby={`${balanceId}${errors[key] ? ` ${errorId}` : ''}`}
-                        onChange={event => updateEntry(key, event.target.value)}
-                        onBlur={() => { if (!errors[key]) setDrafts(current => {
-                          const next = { ...current }; delete next[key]; return next;
-                        }); }} />
-                      <span aria-hidden="true">h</span>
-                    </div>
-                  </div>
-                  <output id={balanceId} className={`day-balance ${difference === null ? 'empty' : tone(difference)}`}
-                    htmlFor={`hours-${key}`} aria-live="polite">
+                  <span className={`counted-hours ${value === undefined ? 'empty' : ''}`}>
+                    {value === undefined ? '—' : formatMinutes(value)}</span>
+                  <span id={balanceId} className={`day-balance ${difference === null ? 'empty' : tone(difference)}`}>
                     {difference === null ? <span aria-label="No hours entered">—</span>
                       : difference === 0 ? <><Icon name="check" /><span>On target</span></> : formatDelta(difference)}
-                  </output>
-                  {errors[key] && <p id={errorId} className="field-error" role="alert">{errors[key]}</p>}
-                </div>;
+                  </span>
+                  {(dayTotal.related > 0 || dayTotal.away > 0) && <span className="day-category-breakdown">
+                    {dayTotal.related > 0 && <span className="category-related">{formatMinutes(dayTotal.related)} related</span>}
+                    {dayTotal.away > 0 && <span className="category-away">{formatMinutes(dayTotal.away)} away</span>}
+                  </span>}
+                  </button>
+                  <div id={`timeline-${key}`} hidden={!isExpanded} role="region" aria-labelledby={`day-${key}`}>
+                    {isExpanded && <DayTimeline date={key} events={dayEvents} legacyMinutes={schedule.legacy[key]}
+                      onSave={(event: TimeEvent, occurrenceDate, scope) => commitChange(state =>
+                        upsertEvent(state, event, occurrenceDate, scope))}
+                      onDelete={(id, date, scope) => commitChange(state => removeEvent(state, id, date, scope))}
+                      onLegacyChange={minutes => commitChange(state => {
+                        const legacy = { ...state.legacy };
+                        if (minutes === null) delete legacy[key];
+                        else legacy[key] = minutes;
+                        return { ...state, legacy };
+                      })} />}
+                  </div>
+                </article>;
               })}
             </div>
-            <div className="timesheet-note"><span className="tiny-dot" />Decimal hours work here. 6.5 = 6h 30m.</div>
+            <div className="timesheet-note"><span className="tiny-dot" />Open a day to add time or set a repeating schedule.</div>
           </section>
 
           <aside className="weekly-summary" aria-labelledby="summary-heading">
+            <div className="summary-content">
             <p className="eyebrow" id="summary-heading">WEEKLY TOTAL</p>
             <div className="total-number" aria-label={`${formatMinutes(summary.total)} logged`}>
               {formatMinutes(summary.total)}</div>
@@ -208,18 +219,20 @@ export default function App() {
             </div>
             <div className="week-graphic" aria-label="Hours by day">
               {days.map(day => {
-                const minutes = entries[dateKey(day)];
+              const dayTotal = totals[dateKey(day)];
                 const expected = expectedMinutes(day);
-                const maxMinutes = Math.max(600, ...days.map(d => entries[dateKey(d)] ?? 0));
                 const description = `${day.toLocaleDateString('en-US', { weekday: 'long' })}: `
-                  + `${minutes === undefined ? 'no hours entered' : `${formatMinutes(minutes)} logged`}, `
+                  + `${formatMinutes(dayTotal.counted)} counted, ${formatMinutes(dayTotal.related)} related, ${formatMinutes(dayTotal.away)} away, `
                   + `${formatMinutes(expected)} expected`;
                 return <Tooltip key={dateKey(day)} content={description}>
                   <div className="graphic-day" tabIndex={0} role="img" aria-label={description}>
                     <div className={`graphic-track ${expected === 0 ? 'no-target' : ''}`}>
-                      {expected > 0 && <span className="graphic-target" style={{ bottom: `${expected / maxMinutes * 100}%` }} />}
-                      <span className={`graphic-fill ${minutes === undefined ? 'empty' : tone(minutes - expected)}`}
-                        style={{ height: `${(minutes ?? 0) / maxMinutes * 100}%` }} />
+                      {expected > 0 && <span className="graphic-target" style={{ bottom: `${expected / graphicMaximum * 100}%` }} />}
+                      <span className="graphic-fill counted-fill" style={{ height: `${dayTotal.counted / graphicMaximum * 100}%` }} />
+                      <span className="graphic-fill related-fill" style={{ bottom: `${dayTotal.counted / graphicMaximum * 100}%`,
+                        height: `${dayTotal.related / graphicMaximum * 100}%` }} />
+                      <span className="graphic-fill away-fill" style={{ bottom: `${(dayTotal.counted + dayTotal.related) / graphicMaximum * 100}%`,
+                        height: `${dayTotal.away / graphicMaximum * 100}%` }} />
                     </div>
                     <span className="graphic-label" aria-hidden="true">{day.toLocaleDateString('en-US', { weekday: 'narrow' })}</span>
                   </div>
@@ -227,18 +240,23 @@ export default function App() {
               })}
             </div>
             <div className="summary-divider" />
+            <dl className="category-totals"><div><dt><i className="legend-dot positive-dot" />Counted</dt><dd>{formatMinutes(summary.total)}</dd></div>
+              <div><dt><i className="legend-dot related-dot" />Related</dt><dd>{formatMinutes(relatedTotal)}</dd></div>
+              <div><dt><i className="legend-dot negative-dot" />Away</dt><dd>{formatMinutes(awayTotal)}</dd></div></dl>
             <dl className="summary-details"><div><dt>Standard week</dt><dd>40h</dd></div>
               <div><dt>Holiday adjustment</dt><dd>{summary.holidayDays ? `−${summary.holidayDays * 8}h` : '—'}</dd></div>
               <div className="adjusted-target"><dt>Your target</dt><dd>{formatMinutes(summary.expected)}</dd></div>
             </dl>
             <div className="summary-footnote"><Icon name="calendar" /><p>US federal holidays adjust your target.
-              You can log hours on any day.</p></div>
+              Only counted time reduces the hours remaining.</p></div>
+            </div>
           </aside>
         </div>
 
-        <div className="under-workspace"><div className="legend" aria-label="Balance color key">
-          <span><i className="legend-dot negative-dot" />Below target</span>
-          <span><i className="legend-dot positive-dot" />Above target</span>
+        <div className="under-workspace"><div className="legend" aria-label="Time categories">
+          <span><i className="legend-dot positive-dot" />Counted</span>
+          <span><i className="legend-dot related-dot" />Related · not counted</span>
+          <span><i className="legend-dot negative-dot" />Away · not counted</span>
         </div><span className="week-convention">Monday–Sunday · 8h per workday</span></div>
       </main>
 
