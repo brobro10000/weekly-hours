@@ -1,7 +1,7 @@
 # Weekly Hours
 
-A small, public time tracker for a clearer workweek. Expand a day, add time blocks to its 24-hour timeline, and compare
-counted hours with a holiday-adjusted weekly target.
+Track a workweek with a daily hours entry or a 24-hour event timeline. Each date remembers its own setting, and both
+views feed the same holiday-adjusted weekly total.
 
 **[Open Weekly Hours](https://brobro10000.github.io/weekly-hours/)**
 
@@ -9,7 +9,11 @@ counted hours with a holiday-adjusted weekly target.
 
 - Monday–Friday starts at 8 hours per day, or 40 per week.
 - Weekends and observed US federal holidays expect zero hours. Every day remains editable.
-- Open a day and add an event with a title, start/end time, and category.
+- Open a day, enter counted hours such as `6.5`, and select **Save hours**.
+- Turn on **Event timeline** for a date to add time blocks or recurring events. Empty dates start with simple entry.
+  Dates with scheduled events open in timeline view until you choose another setting for that date.
+- With the timeline hidden, existing blocks still contribute to their categories. If a counted block is already on
+  the day, the simple form shows its duration and asks for **Additional counted hours**.
 - **Green · Counted:** contributes to the weekly target.
 - **Orange · Related:** work-related time shown separately; does not reduce the target.
 - **Red · Away from desk:** tracked separately; does not reduce the target.
@@ -40,7 +44,8 @@ week. There is no separate planned-versus-completed state.
 ## Earlier hours
 
 Hours saved in the first version are preserved as counted totals without clock times. Expand a day to update or clear
-its **Earlier logged hours**. Clear those hours when replacing them with scheduled blocks to avoid counting twice.
+its counted hours. In timeline view, **Hours without time blocks** includes these entries and hours saved in simple
+view. Reduce this value when replacing those hours with counted blocks.
 The old storage key is retained as a backup; future changes use the new categorized schedule.
 
 ## Design

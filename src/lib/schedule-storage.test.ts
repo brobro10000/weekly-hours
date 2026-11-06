@@ -90,6 +90,16 @@ describe('loading and migrating schedules', () => {
     expect(storage.setItem).not.toHaveBeenCalled();
   });
 
+  it('preserves unreadable timeline settings without rewriting stored entries', () => {
+    for (const timelineEnabled of [null, [], true, { '2026-02-29': false }, { '2026-11-02': 1 }]) {
+      const raw = JSON.stringify({ version: 2, events: [recurring], legacy: {}, timelineEnabled });
+      const { storage, values } = stubStorage({ [SCHEDULE_STORAGE_KEY]: raw });
+      expect(loadSchedule()).toMatchObject({ writable: false, error: expect.any(String) });
+      expect(values.get(SCHEDULE_STORAGE_KEY)).toBe(raw);
+      expect(storage.setItem).not.toHaveBeenCalled();
+    }
+  });
+
   it('preserves corrupt earlier data and disables saving when migration cannot read it', () => {
     const raw = '{"2026-11-02":"invalid"}';
     const { storage, values } = stubStorage({ [STORAGE_KEY]: raw });
@@ -108,6 +118,14 @@ describe('loading and migrating schedules', () => {
 });
 
 describe('saving schedules', () => {
+  it('round trips explicit on and off preferences with an existing schedule', () => {
+    const earlier: Schedule = { version: 2, events: [recurring], legacy: { '2026-11-03': 0 } };
+    stubStorage({ [SCHEDULE_STORAGE_KEY]: JSON.stringify(earlier) });
+    const schedule = { ...loadSchedule().schedule, timelineEnabled: { '2026-11-02': false, '2026-11-03': true } };
+    expect(saveSchedule(schedule)).toBeNull();
+    expect(loadSchedule()).toEqual({ schedule, writable: true, error: null });
+  });
+
   it('persists v2 changes and leaves the earlier storage key untouched', () => {
     const raw = '{"2026-11-02":390,"2026-11-03":0}';
     const { values } = stubStorage({ [STORAGE_KEY]: raw });

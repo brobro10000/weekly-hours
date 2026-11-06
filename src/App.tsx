@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DayPicker } from '@daypicker/react';
-import { Button, IconButton, Tooltip } from '@radix-ui/themes';
+import { Button, IconButton, Switch, Tooltip } from '@radix-ui/themes';
 import {
   addDays, dateKey, expectedMinutes, formatDelta, formatMinutes, holidaysForYear, holidaysOn,
   parseDateKey, startOfWeek, summarizeWeek, weekDays,
@@ -10,6 +10,7 @@ import { loadSchedule, saveSchedule, SCHEDULE_STORAGE_KEY } from './lib/schedule
 import type { Schedule, TimeEvent } from './lib/schedule-types';
 import { applyPatch, emptyPatch, hasPendingChanges, recordChanges } from './lib/schedule-draft';
 import DayTimeline from './components/DayTimeline';
+import HoursEntry from './components/HoursEntry';
 
 function Icon({ name }: { name: 'left' | 'right' | 'calendar' | 'close' | 'check' | 'arrow' | 'lock' }) {
   const paths = {
@@ -28,13 +29,6 @@ const fullDate = (date: Date) => date.toLocaleDateString('en-US', {
 const shortDate = (date: Date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const tone = (delta: number) => delta < 0 ? 'negative' : delta > 0 ? 'positive' : 'neutral';
 type ScheduleChange = (schedule: Schedule) => Schedule;
-
-function applyChanges(schedule: Schedule, changes: ScheduleChange[]): Schedule {
-  const next = changes.reduce((state, change) => change(state), schedule);
-  const error = validateSchedule(next);
-  if (error) throw new Error(error);
-  return next;
-}
 
 export default function App() {
   const [initial] = useState(loadSchedule);
@@ -83,12 +77,15 @@ export default function App() {
     return () => window.removeEventListener('storage', sync);
   }, []);
 
-  function commitChange(change: ScheduleChange): string | null {
+  function commitChange(change: ScheduleChange, kind: 'entry' | 'view' = 'entry'): string | null {
     const latest = loadSchedule();
     try {
       const base = latest.writable ? applyPatch(latest.schedule, pendingChanges.current) : currentSchedule.current;
-      const next = applyChanges(base, [change]);
-      const error = latest.writable ? saveSchedule(next) : latest.error;
+      const next = change(base);
+      const conflict = validateSchedule(next);
+      // A user can still open the timeline to fix a conflict between tabs.
+      if (conflict && kind === 'entry') return conflict;
+      const error = conflict ?? (latest.writable ? saveSchedule(next) : latest.error);
       pendingChanges.current = error ? recordChanges(pendingChanges.current, base, next) : emptyPatch();
       currentSchedule.current = next;
       setSchedule(next);
@@ -97,6 +94,22 @@ export default function App() {
     } catch (error) {
       return error instanceof Error ? error.message : 'This event could not be saved. Check its dates and times.';
     }
+  }
+
+  function setTimeline(key: string, enabled: boolean) {
+    const error = commitChange(state => ({
+      ...state, timelineEnabled: { ...state.timelineEnabled, [key]: enabled },
+    }), 'view');
+    if (error) setStorageError(error);
+  }
+
+  function saveHours(key: string, minutes: number | null) {
+    return commitChange(state => {
+      const legacy = { ...state.legacy };
+      if (minutes === null) delete legacy[key];
+      else legacy[key] = minutes;
+      return { ...state, legacy };
+    });
   }
 
   function changeWeek(next: Date) {
@@ -161,11 +174,13 @@ export default function App() {
                 const isToday = key === today;
                 const isExpanded = expandedDate === key;
                 const dayEvents = eventsForDate(schedule.events, key);
+                const timelineEnabled = schedule.timelineEnabled?.[key] ?? (dayEvents.length > 0);
+                const untimedMinutes = schedule.legacy[key];
                 const dayTotal = totals[key];
                 const balanceId = `balance-${key}`;
                 return <article className={`day-item ${isExpanded ? 'is-expanded' : ''}`} key={key}>
                   <button className={`day-row day-toggle ${isToday ? 'is-today' : ''} ${weekend ? 'is-weekend' : ''}`}
-                    id={`day-${key}`} aria-expanded={isExpanded} aria-controls={`timeline-${key}`}
+                    id={`day-${key}`} aria-expanded={isExpanded} aria-controls={`entry-${key}`}
                     onClick={() => setExpandedDate(isExpanded ? null : key)}>
                   <div className="day-info">
                     <span className="day-label"><span className="day-chevron" aria-hidden="true"><Icon name="right" /></span>
@@ -189,22 +204,31 @@ export default function App() {
                     {dayTotal.away > 0 && <span className="category-away">{formatMinutes(dayTotal.away)} away</span>}
                   </span>}
                   </button>
-                  <div id={`timeline-${key}`} hidden={!isExpanded} role="region" aria-labelledby={`day-${key}`}>
-                    {isExpanded && <DayTimeline date={key} events={dayEvents} legacyMinutes={schedule.legacy[key]}
-                      onSave={(event: TimeEvent, occurrenceDate, scope) => commitChange(state =>
-                        upsertEvent(state, event, occurrenceDate, scope))}
-                      onDelete={(id, date, scope) => commitChange(state => removeEvent(state, id, date, scope))}
-                      onLegacyChange={minutes => commitChange(state => {
-                        const legacy = { ...state.legacy };
-                        if (minutes === null) delete legacy[key];
-                        else legacy[key] = minutes;
-                        return { ...state, legacy };
-                      })} />}
+                  <div id={`entry-${key}`} hidden={!isExpanded} role="region" aria-labelledby={`day-${key}`}>
+                    {isExpanded && <>
+                      <label className="timeline-setting" htmlFor={`mode-${key}`}>
+                        Event timeline
+                        <Switch id={`mode-${key}`} checked={timelineEnabled} size="2"
+                          aria-controls={`timeline-${key}`} onCheckedChange={enabled => setTimeline(key, enabled)} />
+                      </label>
+                      <div id={`timeline-${key}`} hidden={!timelineEnabled}>
+                        <DayTimeline date={key} events={dayEvents} untimedMinutes={untimedMinutes}
+                          onSave={(event: TimeEvent, occurrenceDate, scope) => commitChange(state =>
+                            upsertEvent(state, event, occurrenceDate, scope))}
+                          onDelete={(id, date, scope) => commitChange(state => removeEvent(state, id, date, scope))} />
+                      </div>
+                      <div hidden={timelineEnabled && untimedMinutes === undefined}>
+                        <HoursEntry minutes={untimedMinutes} inTimeline={timelineEnabled}
+                          countedBlockMinutes={dayTotal.counted - (untimedMinutes ?? 0)}
+                          onSave={minutes => saveHours(key, minutes)}
+                          onClear={() => document.getElementById(`mode-${key}`)?.focus()} />
+                      </div>
+                    </>}
                   </div>
                 </article>;
               })}
             </div>
-            <div className="timesheet-note"><span className="tiny-dot" />Open a day to add time or set a repeating schedule.</div>
+            <div className="timesheet-note"><span className="tiny-dot" />Open a day to enter hours or use its event timeline.</div>
           </section>
 
           <aside className="weekly-summary" aria-labelledby="summary-heading">

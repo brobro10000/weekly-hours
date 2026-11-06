@@ -3,11 +3,29 @@ import type { Schedule, TimeEvent } from './schedule-types';
 export type SchedulePatch = {
   events: Record<string, TimeEvent | null>;
   legacy: Record<string, number | null>;
+  timelineEnabled: Record<string, boolean | null>;
 };
 
-export const emptyPatch = (): SchedulePatch => ({ events: {}, legacy: {} });
+export const emptyPatch = (): SchedulePatch => ({ events: {}, legacy: {}, timelineEnabled: {} });
 export const hasPendingChanges = (patch: SchedulePatch) =>
-  Object.keys(patch.events).length > 0 || Object.keys(patch.legacy).length > 0;
+  Object.values(patch).some(changes => Object.keys(changes).length > 0);
+
+function applyDailyChanges<T>(saved: Record<string, T>, changes: Record<string, T | null>): Record<string, T> {
+  const merged = { ...saved };
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === null) delete merged[key];
+    else merged[key] = value;
+  }
+  return merged;
+}
+
+function recordDailyChanges<T>(pending: Record<string, T | null>, before: Record<string, T>, after: Record<string, T>) {
+  const changes = { ...pending };
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (before[key] !== after[key]) changes[key] = after[key] ?? null;
+  }
+  return changes;
+}
 
 /** Merge pending edits before validation so a user can correct a cross-tab conflict. */
 export function applyPatch(schedule: Schedule, patch: SchedulePatch): Schedule {
@@ -16,24 +34,24 @@ export function applyPatch(schedule: Schedule, patch: SchedulePatch): Schedule {
     if (event === null) events.delete(id);
     else events.set(id, event);
   }
-  const legacy = { ...schedule.legacy };
-  for (const [key, minutes] of Object.entries(patch.legacy)) {
-    if (minutes === null) delete legacy[key];
-    else legacy[key] = minutes;
-  }
-  return { version: 2, events: [...events.values()], legacy };
+  const merged: Schedule = {
+    version: 2, events: [...events.values()], legacy: applyDailyChanges(schedule.legacy, patch.legacy),
+  };
+  const preferences = applyDailyChanges(schedule.timelineEnabled ?? {}, patch.timelineEnabled);
+  if (Object.keys(preferences).length) merged.timelineEnabled = preferences;
+  return merged;
 }
 
 export function recordChanges(pending: SchedulePatch, before: Schedule, after: Schedule): SchedulePatch {
   const events = { ...pending.events };
-  const legacy = { ...pending.legacy };
   const previous = new Map(before.events.map(event => [event.id, event]));
   const next = new Map(after.events.map(event => [event.id, event]));
   for (const id of new Set([...previous.keys(), ...next.keys()])) {
     if (JSON.stringify(previous.get(id)) !== JSON.stringify(next.get(id))) events[id] = next.get(id) ?? null;
   }
-  for (const key of new Set([...Object.keys(before.legacy), ...Object.keys(after.legacy)])) {
-    if (before.legacy[key] !== after.legacy[key]) legacy[key] = after.legacy[key] ?? null;
-  }
-  return { events, legacy };
+  return {
+    events,
+    legacy: recordDailyChanges(pending.legacy, before.legacy, after.legacy),
+    timelineEnabled: recordDailyChanges(pending.timelineEnabled, before.timelineEnabled ?? {}, after.timelineEnabled ?? {}),
+  };
 }

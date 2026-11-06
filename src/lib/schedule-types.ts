@@ -22,6 +22,7 @@ export type Schedule = {
   version: 2;
   events: TimeEvent[];
   legacy: Record<string, number>;
+  timelineEnabled?: Record<string, boolean>;
 };
 
 export type DayTotals = { counted: number; related: number; away: number; hasEntries: boolean };

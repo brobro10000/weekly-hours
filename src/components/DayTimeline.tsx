@@ -2,17 +2,16 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Button } from '@radix-ui/themes';
 import { formatClock, parseClock, validateEvent } from '../lib/schedule';
-import { formatMinutes, parseDateKey, parseHours } from '../lib/time';
+import { formatMinutes, parseDateKey } from '../lib/time';
 import type { EditScope, TimeCategory, TimeEvent } from '../lib/schedule-types';
 import './DayTimeline.css';
 
 type DayTimelineProps = {
   date: string;
   events: TimeEvent[];
-  legacyMinutes: number | undefined;
+  untimedMinutes: number | undefined;
   onSave: (event: TimeEvent, occurrenceDate?: string, scope?: EditScope) => string | null;
   onDelete: (id: string, date: string, scope: EditScope) => string | null;
-  onLegacyChange: (minutes: number | null) => string | null;
 };
 
 const categories: { value: TimeCategory; label: string; detail: string }[] = [
@@ -27,7 +26,6 @@ const weekdays = [
   { day: 0, short: 'S', label: 'Sunday' },
 ];
 const categoryName = (category: TimeCategory) => categories.find(item => item.value === category)!.label;
-const hoursText = (minutes: number | undefined) => minutes === undefined ? '' : String(Number((minutes / 60).toFixed(2)));
 
 function recurrenceText(event: TimeEvent) {
   if (!event.recurrence) return null;
@@ -35,7 +33,7 @@ function recurrenceText(event: TimeEvent) {
   return `${event.recurrence.intervalWeeks === 1 ? 'Weekly' : `Every ${event.recurrence.intervalWeeks} weeks`} · ${days.join(', ')}`;
 }
 
-export default function DayTimeline({ date, events, legacyMinutes, onSave, onDelete, onLegacyChange }: DayTimelineProps) {
+export default function DayTimeline({ date, events, untimedMinutes, onSave, onDelete }: DayTimelineProps) {
   const id = useId();
   const addButton = useRef<HTMLButtonElement>(null);
   const titleInput = useRef<HTMLInputElement>(null);
@@ -55,14 +53,11 @@ export default function DayTimeline({ date, events, legacyMinutes, onSave, onDel
   const [scope, setScope] = useState<EditScope>('occurrence');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
-  const [legacyDraft, setLegacyDraft] = useState(hoursText(legacyMinutes));
-  const [legacyError, setLegacyError] = useState<string | null>(null);
-  const legacyFocused = useRef(false);
   const singleOccurrence = Boolean(editing?.recurrence) && scope === 'occurrence';
   const totals = events.reduce((result, event) => {
     result[event.category] += event.end - event.start;
     return result;
-  }, { counted: legacyMinutes ?? 0, related: 0, away: 0 });
+  }, { counted: untimedMinutes ?? 0, related: 0, away: 0 });
 
   useEffect(() => {
     if (formOpen) titleInput.current?.focus();
@@ -71,10 +66,6 @@ export default function DayTimeline({ date, events, legacyMinutes, onSave, onDel
   useEffect(() => {
     if (deleting) deletionHeading.current?.focus();
   }, [deleting]);
-
-  useEffect(() => {
-    if (!legacyFocused.current) setLegacyDraft(hoursText(legacyMinutes));
-  }, [legacyMinutes]);
 
   function returnFocus() {
     requestAnimationFrame(() => addButton.current?.focus());
@@ -138,18 +129,6 @@ export default function DayTimeline({ date, events, legacyMinutes, onSave, onDel
     if (problem) { setError(problem); return; }
     setNotice(deleting.recurrence && scope === 'occurrence' ? 'Occurrence removed.' : 'Event removed.');
     closeEditor();
-  }
-
-  function updateLegacy(clear = false) {
-    try {
-      const problem = onLegacyChange(clear ? null : parseHours(legacyDraft));
-      if (problem) { setLegacyError(problem); return; }
-      setLegacyError(null);
-      setNotice(clear ? 'Earlier logged hours cleared.' : 'Earlier logged hours updated.');
-      if (clear) returnFocus();
-    } catch {
-      setLegacyError('Enter decimal hours from 0 to 24, such as 6.5, or clear this earlier total.');
-    }
   }
 
   return <div className="day-timeline" onKeyDown={event => {
@@ -299,21 +278,6 @@ export default function DayTimeline({ date, events, legacyMinutes, onSave, onDel
         <Button size="2" variant="ghost" color="gray" onClick={closeEditor}>Cancel</Button></div>
     </div>}
 
-    {legacyMinutes !== undefined && <div className="legacy-hours">
-      <div><h3>Earlier logged hours</h3><p>Kept in your counted total, without clock times.
-        Clear these hours when replacing them with time blocks.</p></div>
-      <div className="legacy-controls"><label className="timeline-field" htmlFor={`${id}-legacy`}>
-        <span className="timeline-sr-only">Earlier logged hours</span>
-        <input id={`${id}-legacy`} type="text" inputMode="decimal" value={legacyDraft}
-          onFocus={() => { legacyFocused.current = true; }} onBlur={() => { legacyFocused.current = false; }}
-          onChange={event => setLegacyDraft(event.target.value)} aria-invalid={Boolean(legacyError)}
-          aria-describedby={legacyError ? `${id}-legacy-error` : undefined} />
-      </label><span className="legacy-unit" aria-hidden="true">h</span>
-        <Button size="1" variant="soft" onClick={() => updateLegacy()}>Update earlier hours</Button>
-        <button type="button" className="legacy-clear" onClick={() => updateLegacy(true)}>Clear earlier hours</button>
-      </div>
-      {legacyError && <p id={`${id}-legacy-error`} className="timeline-error" role="alert">{legacyError}</p>}
-    </div>}
     <p className="timeline-sr-only" role="status">{notice}</p>
   </div>;
 }

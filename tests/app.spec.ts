@@ -8,6 +8,8 @@ const legacyKey = 'weekly-hours.entries.v1';
 const summary = (page: Page) => page.getByRole('complementary', { name: 'WEEKLY TOTAL' });
 const balance = (page: Page, date: string) => page.locator(`#balance-${date}`);
 const panel = (page: Page) => page.locator('.day-timeline');
+const timelineSwitch = (page: Page) => page.getByRole('switch', { name: 'Event timeline', exact: true });
+const hoursField = (page: Page, name = 'Counted hours') => page.getByLabel(name, { exact: true });
 const calendarTrigger = (page: Page) => page.getByRole('button', { name: /Nov 2 – Nov 8/ });
 const eventRow = (page: Page, title: string) => page.getByRole('list', { name: 'Events for this day' })
   .getByRole('listitem').filter({ has: page.getByText(title, { exact: true }) });
@@ -15,12 +17,13 @@ const eventRow = (page: Page, title: string) => page.getByRole('list', { name: '
 async function openDay(page: Page, weekday = 'Monday') {
   const trigger = page.getByRole('button', { name: new RegExp(`^${weekday}`) });
   if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
-  await expect(panel(page)).toBeVisible();
+  await expect(timelineSwitch(page)).toBeVisible();
 }
 
 type EventInput = { title: string; start?: string; end?: string; category?: 'Counted' | 'Related' | 'Away from desk' };
 
 async function beginEvent(page: Page, { title, start = '09:00', end = '10:00', category = 'Counted' }: EventInput) {
+  if (!await timelineSwitch(page).isChecked()) await timelineSwitch(page).click();
   await page.getByRole('button', { name: 'Add event', exact: true }).click();
   await page.getByRole('textbox', { name: /^Event title/ }).fill(title);
   await page.getByRole('textbox', { name: 'Start time', exact: true }).fill(start);
@@ -62,6 +65,89 @@ async function assertAxe(page: Page) {
 test.beforeEach(async ({ page }) => {
   await page.clock.setFixedTime(fixedToday);
   await page.goto('./');
+});
+
+test('simple hours update the balance and each date remembers its own timeline switch', async ({ page }) => {
+  await openDay(page);
+  await expect(timelineSwitch(page)).not.toBeChecked();
+  await expect(panel(page)).toBeHidden();
+  await hoursField(page).fill('6.5');
+  await page.getByRole('button', { name: 'Save hours', exact: true }).click();
+  await expect(balance(page, '2026-11-02')).toHaveText('−1h 30m');
+  await expect(summary(page).getByLabel('6h 30m logged', { exact: true })).toBeVisible();
+
+  await openDay(page, 'Tuesday');
+  await timelineSwitch(page).click();
+  await expect(panel(page)).toBeVisible();
+  await nextWeek(page);
+  await openDay(page, 'Tuesday');
+  await expect(timelineSwitch(page)).not.toBeChecked();
+
+  await page.reload();
+  await openDay(page, 'Tuesday');
+  await expect(timelineSwitch(page)).toBeChecked();
+  await expect(panel(page)).toBeVisible();
+  await openDay(page);
+  await expect(timelineSwitch(page)).not.toBeChecked();
+  await expect(hoursField(page)).toHaveValue('6.5');
+  await timelineSwitch(page).click();
+  await expect(hoursField(page, 'Hours without time blocks')).toHaveValue('6.5');
+  await expect(panel(page).locator('.timeline-block')).toHaveCount(0);
+  await expect(summary(page).getByLabel('6h 30m logged', { exact: true })).toBeVisible();
+});
+
+test('hiding a recurring date keeps each category counted once and leaves other occurrences visible', async ({ page }) => {
+  await openDay(page);
+  await beginEvent(page, { title: 'Regular work' });
+  await repeatOn(page, ['Monday', 'Wednesday']);
+  await saveEvent(page);
+  await addEvent(page, { title: 'Reading', start: '11:00', end: '11:30', category: 'Related' });
+  await addEvent(page, { title: 'Lunch', start: '12:00', end: '12:45', category: 'Away from desk' });
+  await timelineSwitch(page).click();
+  await expect(panel(page)).toBeHidden();
+  await expect(hoursField(page, 'Additional counted hours')).toHaveValue('');
+  await expect(summary(page).getByLabel('2h logged', { exact: true })).toBeVisible();
+  await hoursField(page, 'Additional counted hours').fill('7.5');
+  await page.getByRole('button', { name: 'Save hours', exact: true }).click();
+  await expect(balance(page, '2026-11-02')).toHaveText('+30m');
+  await expect(summary(page).getByLabel('9h 30m logged', { exact: true })).toBeVisible();
+  await expect(summary(page).getByRole('img', { name: /^Monday:/ })).toHaveAccessibleName(
+    /8h 30m counted, 30m related, 45m away/);
+  await openDay(page, 'Wednesday');
+  await expect(timelineSwitch(page)).toBeChecked();
+  await expect(eventRow(page, 'Regular work')).toBeVisible();
+  await nextWeek(page);
+  await openDay(page);
+  await expect(timelineSwitch(page)).toBeChecked();
+  await expect(eventRow(page, 'Regular work')).toBeVisible();
+
+  await page.reload();
+  await openDay(page);
+  await expect(timelineSwitch(page)).not.toBeChecked();
+  await expect(hoursField(page, 'Additional counted hours')).toHaveValue('7.5');
+  await timelineSwitch(page).click();
+  await expect(page.getByRole('list', { name: 'Events for this day' }).getByRole('listitem')).toHaveCount(3);
+  await expect(hoursField(page, 'Hours without time blocks')).toHaveValue('7.5');
+  await expect(summary(page).getByLabel('9h 30m logged', { exact: true })).toBeVisible();
+});
+
+test('the simple editor and day switch are accessible on a narrow screen and work by keyboard', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 810 });
+  await openDay(page);
+  await expect(hoursField(page)).toBeVisible();
+  await hoursField(page).fill('8.5');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await assertAxe(page);
+  await timelineSwitch(page).focus();
+  await page.keyboard.press('Space');
+  await expect(timelineSwitch(page)).toBeChecked();
+  await expect(panel(page)).toBeVisible();
+  await expect(timelineSwitch(page)).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(timelineSwitch(page)).not.toBeChecked();
+  await expect(hoursField(page)).toHaveValue('8.5');
+  await hoursField(page).press('Enter');
+  await expect(balance(page, '2026-11-02')).toHaveText('+30m');
 });
 
 test('three labeled categories appear on the timeline but only counted hours reduce the weekly target', async ({ page }) => {
@@ -218,11 +304,13 @@ test('earlier totals migrate without invented clock times and can be cleared wit
   await expect(summary(page).getByLabel('6h 30m logged', { exact: true })).toBeVisible();
   await expect(balance(page, '2026-11-03')).toHaveText('−8h');
   await openDay(page);
-  await expect(page.getByRole('textbox', { name: 'Earlier logged hours', exact: true })).toHaveValue('6.5');
+  await expect(hoursField(page)).toHaveValue('6.5');
+  await timelineSwitch(page).click();
+  await expect(hoursField(page, 'Hours without time blocks')).toHaveValue('6.5');
   await expect(panel(page).locator('.timeline-block')).toHaveCount(0);
   await addEvent(page, { title: 'New work', start: '09:00', end: '10:00' });
   await expect(summary(page).getByLabel('7h 30m logged', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Clear earlier hours', exact: true }).click();
+  await page.getByRole('button', { name: 'Clear hours', exact: true }).click();
   await expect(summary(page).getByLabel('1h logged', { exact: true })).toBeVisible();
   await page.reload();
   await expect(summary(page).getByLabel('1h logged', { exact: true })).toBeVisible();
@@ -253,10 +341,11 @@ test('an independent change from another tab preserves the active event draft an
   await openDay(page);
   await beginEvent(page, { title: 'My draft', start: '09:00', end: '10:00' });
   await page.evaluate(key => {
-    const schedule = { version: 2, legacy: {}, events: [{
+    const schedule = JSON.parse(localStorage.getItem(key)!);
+    schedule.events.push({
       id: 'another-tab', title: 'Other tab event', category: 'counted', date: '2026-11-03',
       start: 540, end: 660, recurrence: null, excludedDates: [],
-    }] };
+    });
     localStorage.setItem(key, JSON.stringify(schedule));
     window.dispatchEvent(new StorageEvent('storage', { key }));
   }, storageKey);
@@ -394,6 +483,10 @@ test('a conflicting cross-tab event stays visible while an unsaved local event i
   await expect(eventRow(page, 'Local work')).toBeVisible();
   await expect(eventRow(page, 'Remote conflict')).toBeVisible();
   await expect(page.getByRole('alert')).toContainText(/overlap|another tab|conflict/i);
+  await timelineSwitch(page).click();
+  await expect(panel(page)).toBeHidden();
+  await timelineSwitch(page).click();
+  await expect(eventRow(page, 'Local work')).toBeVisible();
   await page.evaluate(() => { (window as Window & { restoreStorage?: () => void }).restoreStorage?.(); });
   await page.getByRole('button', { name: 'Edit Local work', exact: true }).click();
   await page.getByRole('textbox', { name: 'Start time', exact: true }).fill('10:30');

@@ -1,10 +1,12 @@
-# Timeline interface — revision 1
+# Timeline interface — revision 2
 
 Shared types live in `src/lib/schedule-types.ts`. Root owns these types and all integration.
 
 ## Behavior
 
-- Day rows expand into a 00:00–24:00 timeline and event list. Only one day needs to be expanded at once.
+- Expand one day at a time. The per-date **Event timeline** switch chooses between a decimal hours entry and the
+  00:00–24:00 timeline. The optional v2 `timelineEnabled` map stores explicit boolean settings by civil date.
+  A date with no saved preference shows its timeline when it has a scheduled occurrence.
 - Counted is green and reduces the weekly target. Related is orange and Away is red; neither reduces the target.
 - Times use integer minutes, with `0 <= start < end <= 1440`. Overnight events are split into two day entries.
 - Events have optional short titles. Store a useful category label if a title is omitted.
@@ -17,7 +19,8 @@ Shared types live in `src/lib/schedule-types.ts`. Root owns these types and all 
   date range, including earlier dates, while preserving detached overrides. Whole-series deletion removes direct
   detached one-off overrides too. Overrides converted into independent recurring series remain independent.
 - Keep prior daily totals as `legacy` counted minutes without inventing clock times. Show and allow editing this
-  earlier total inside the expanded day. Legacy plus all scheduled category minutes must not exceed 1440 per day.
+  total in either view. Simple entry also writes to `legacy`. Untimed minutes plus all scheduled category minutes
+  must fit in 1440 minutes per day. Visibility has no effect on totals, overlap checks, or recurrence.
 - Calendar, target adjustments, browser-local storage, mobile layout, and reduced-motion support remain.
 
 ## Domain functions (`src/lib/schedule.ts`)
@@ -43,10 +46,9 @@ Default export with props:
 type DayTimelineProps = {
   date: string;
   events: TimeEvent[];
-  legacyMinutes: number | undefined;
+  untimedMinutes: number | undefined;
   onSave: (event: TimeEvent, occurrenceDate?: string, scope?: EditScope) => string | null;
   onDelete: (id: string, date: string, scope: EditScope) => string | null;
-  onLegacyChange: (minutes: number | null) => string | null;
 };
 ```
 

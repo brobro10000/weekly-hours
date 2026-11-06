@@ -181,6 +181,11 @@ export function validateSchedule(schedule: Schedule): string | null {
   if (!isRecord(schedule) || schedule.version !== 2 || !Array.isArray(schedule.events) || !isRecord(schedule.legacy)) {
     return 'The saved schedule could not be read. Your existing data has been kept.';
   }
+  const preferences = schedule.timelineEnabled;
+  if (preferences !== undefined && (!isRecord(preferences)
+    || Object.entries(preferences).some(([key, enabled]) => !validDate(key) || typeof enabled !== 'boolean'))) {
+    return 'The saved timeline settings for individual dates could not be read.';
+  }
   const ids = new Set<string>();
   for (const event of schedule.events) {
     const error = validateEvent(event);
@@ -190,7 +195,7 @@ export function validateSchedule(schedule: Schedule): string | null {
   }
   for (const [key, minutes] of Object.entries(schedule.legacy)) {
     if (!validDate(key) || !Number.isInteger(minutes) || minutes < 0 || minutes > MINUTES_PER_DAY) {
-      return 'An earlier logged total could not be read. Keep hours between 0 and 24 per day.';
+      return 'An hours entry could not be read. Keep hours between 0 and 24 per day.';
     }
   }
   for (let index = 0; index < schedule.events.length; index += 1) {
@@ -204,7 +209,7 @@ export function validateSchedule(schedule: Schedule): string | null {
   for (const key of Object.keys(schedule.legacy)) {
     const totals = dayTotals(schedule, key);
     if (totals.counted + totals.related + totals.away > MINUTES_PER_DAY) {
-      return `Earlier hours plus time blocks exceed 24 hours on ${key}. Adjust the earlier total first.`;
+      return `Entered hours plus time blocks exceed 24 hours on ${key}. Reduce the hours or shorten a block.`;
     }
   }
   return null;
